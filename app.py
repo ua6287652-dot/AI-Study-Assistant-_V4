@@ -126,6 +126,37 @@ def groq_chat(api_key, prompt, system="You are a helpful study assistant.", temp
 # -----------------------------
 # Auth
 # -----------------------------
+def supabase_connection_error(exc):
+    """Turn low-level Supabase/network errors into useful user-facing diagnostics."""
+    msg = str(exc).strip() or exc.__class__.__name__
+    low = msg.lower()
+
+    if "name or service not known" in low or "getaddrinfo failed" in low or "temporary failure in name resolution" in low:
+        return (
+            "Supabase hostname could not be resolved (DNS/network error). "
+            f"Current SUPABASE_URL is: {SUPABASE_URL or 'EMPTY'}. "
+            "It must be exactly your project URL, for example "
+            "'https://YOUR_PROJECT_REF.supabase.co' with no '/rest/v1/'. "
+            "If this is Streamlit Cloud, verify the URL in App Settings → Secrets "
+            "and make sure the Supabase project is active."
+        )
+
+    if "invalid api key" in low or "jwt" in low or "401" in low or "unauthorized" in low:
+        return (
+            "Supabase rejected the API key (HTTP/authentication error). "
+            "Use the project's Publishable/anon key in SUPABASE_KEY, not the secret/service-role key. "
+            f"URL currently configured: {SUPABASE_URL or 'EMPTY'}."
+        )
+
+    if "404" in low or "not found" in low:
+        return (
+            "Supabase endpoint was not found. Check SUPABASE_URL. "
+            f"Current URL: {SUPABASE_URL or 'EMPTY'}. "
+            "Use the project root URL without '/rest/v1/'."
+        )
+
+    return f"Supabase error ({exc.__class__.__name__}): {msg}"
+
 def sign_in(email, password):
     try:
         res = supabase.auth.sign_in_with_password({"email": email, "password": password})
@@ -196,15 +227,21 @@ if not st.session_state.user:
             try:
                 # Auth settings endpoint is public and does not require a logged-in user.
                 import requests
+                endpoint = f"{SUPABASE_URL}/auth/v1/settings"
                 r = requests.get(
-                    f"{SUPABASE_URL}/auth/v1/settings",
-                    headers={"apikey": SUPABASE_KEY},
-                    timeout=10,
+                    endpoint,
+                    headers={
+                        "apikey": SUPABASE_KEY,
+                        "Authorization": f"Bearer {SUPABASE_KEY}",
+                    },
+                    timeout=15,
                 )
                 if 200 <= r.status_code < 300:
-                    st.success("Supabase connection is working. The signup issue is not DNS/network related.")
+                    st.success("✅ Supabase connection is working. The signup issue is not DNS/network related.")
+                    st.caption(f"Tested: {endpoint}")
                 else:
                     st.error(f"Supabase responded with HTTP {r.status_code}: {r.text[:500]}")
+                    st.caption(f"Tested: {endpoint}")
             except Exception as e:
                 st.error(supabase_connection_error(e))
 
